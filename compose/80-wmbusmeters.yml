@@ -1,0 +1,33 @@
+###############################################################################
+#
+# WMBusmeters reads telegrams that LilyGO already published to MQTT
+# and decodes the original Apator meters. It has no host port.
+#
+###############################################################################
+
+services:
+  wmbusmeters:
+    image: ${WMBUSMETERS_IMAGE:?WMBUSMETERS_IMAGE}
+    container_name: ha-wmbusmeters
+    hostname: ha-wmbusmeters
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+    entrypoint:
+      - /bin/sh
+      - /usr/local/bin/ha-wmbus-entrypoint.sh
+    volumes:
+      - ${WMBUSMETERS_HOST_DIR:?WMBUSMETERS_HOST_DIR}:/wmbusmeters_data
+      - ../configs/wmbusmeters/entrypoint.sh:/usr/local/bin/ha-wmbus-entrypoint.sh:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    networks:
+      - ha-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE}
+        max-file: "${LOG_MAX_FILES}"

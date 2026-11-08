@@ -1,0 +1,20 @@
+###############################################################################
+#
+# HomeAssistant-domaPc
+#
+# Application stack for the home Incus container.
+# Public HTTP ends in Infrastructure-netcup on the VPS.
+# This project does not run a reverse proxy or a certificate client.
+#
+###############################################################################
+
+name: homeassistant-domapc
+
+include:
+  - compose/00-networks.yml
+  - compose/30-homeassistant.yml
+  - compose/40-postgresql.yml
+  - compose/50-mosquitto.yml
+  - compose/60-zigbee2mqtt.yml
+  - compose/70-esphome.yml
+  - compose/80-wmbusmeters.yml

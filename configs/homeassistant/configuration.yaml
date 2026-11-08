@@ -1,0 +1,24 @@
+# Seeded only when Home Assistant has no configuration.yaml yet.
+# Later edits in the data directory are kept.
+
+default_config:
+
+homeassistant:
+  external_url: https://homeassistant.serveftp.org
+  internal_url: http://homeassistant:8123
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - __HA_TRUSTED_PROXY__
+  ip_ban_enabled: true
+  login_attempts_threshold: 5
+
+recorder:
+  db_url: !secret recorder_db_url
+
+mqtt:
+  broker: mosquitto
+  port: 1883
+  username: !secret mqtt_user
+  password: !secret mqtt_password

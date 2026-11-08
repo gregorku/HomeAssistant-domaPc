@@ -1,0 +1,36 @@
+###############################################################################
+#
+# ESPHome dashboard. Host network is the Incus container network,
+# so the dashboard can reach devices on br0. The four original
+# USB serial ports stay mapped. Port 6052 is the dashboard port.
+#
+###############################################################################
+
+services:
+  esphome:
+    image: ${ESPHOME_IMAGE:?ESPHOME_IMAGE}
+    container_name: ha-esphome
+    hostname: ha-esphome
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    command:
+      - dashboard
+      - /config
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+      - /dev/ttyUSB1:/dev/ttyUSB1
+      - /dev/ttyUSB2:/dev/ttyUSB2
+      - /dev/ttyUSB3:/dev/ttyUSB3
+    environment:
+      TZ: ${TZ}
+      USERNAME: ${ESPHOME_USERNAME}
+      PASSWORD: ${ESPHOME_PASSWORD}
+    volumes:
+      - ${ESPHOME_HOST_DIR:?ESPHOME_HOST_DIR}:/config
+      - /etc/localtime:/etc/localtime:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE}
+        max-file: "${LOG_MAX_FILES}"

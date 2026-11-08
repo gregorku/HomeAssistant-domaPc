@@ -1,0 +1,41 @@
+###############################################################################
+#
+# Zigbee2MQTT. The frontend stays on port 8080.
+# The SMLIGHT SLZB-07Mg24 stick is the original by-id node.
+# Incus must pass that node into this container before start.
+#
+###############################################################################
+
+services:
+  zigbee2mqtt:
+    image: ${ZIGBEE2MQTT_IMAGE:?ZIGBEE2MQTT_IMAGE}
+    container_name: ha-zigbee2mqtt
+    hostname: ha-zigbee2mqtt
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      ZIGBEE2MQTT_CONFIG_SERIAL_PORT: /dev/ttyACM0
+      ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER: ember
+      ZIGBEE2MQTT_CONFIG_MQTT_SERVER: mqtt://mosquitto:1883
+      ZIGBEE2MQTT_CONFIG_MQTT_USER: ${MQTT_USER}
+      ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD: ${MQTT_PASSWORD}
+      ZIGBEE2MQTT_CONFIG_FRONTEND_PORT: "8080"
+      ZIGBEE2MQTT_CONFIG_FRONTEND_HOST: 0.0.0.0
+      ZIGBEE2MQTT_CONFIG_PERMIT_JOIN: "false"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${ZIGBEE2MQTT_HOST_DIR:?ZIGBEE2MQTT_HOST_DIR}:/app/data
+      - /run/udev:/run/udev:ro
+    devices:
+      - /dev/serial/by-id/usb-SMLIGHT_SMLIGHT_SLZB-07Mg24_0ab50f4025adef1196c58a4ba8793231-if00-port0:/dev/ttyACM0
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    networks:
+      - ha-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE}
+        max-file: "${LOG_MAX_FILES}"

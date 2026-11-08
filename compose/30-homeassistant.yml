@@ -1,0 +1,43 @@
+###############################################################################
+#
+# Home Assistant. Port 8123 is published on the Incus container so
+# 10.110.100.100 is the WireGuard address of the physical host.
+# MikroTik DNAT sends port 8123 to this container's LAN address.
+#
+###############################################################################
+
+services:
+  homeassistant:
+    image: ${HA_IMAGE:?HA_IMAGE}:${HA_TAG:?HA_TAG}
+    container_name: ha-homeassistant
+    hostname: ha-homeassistant
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      TZ: ${TZ}
+    ports:
+      - "8123:8123"
+    volumes:
+      - ${HA_CONFIG_HOST_DIR:?HA_CONFIG_HOST_DIR}:/config
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8123/", timeout=5)
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    networks:
+      - ha-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE}
+        max-file: "${LOG_MAX_FILES}"

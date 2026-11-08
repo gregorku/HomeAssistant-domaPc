@@ -1,0 +1,12 @@
+###############################################################################
+#
+# External network. deploy.sh creates it from .env.
+# Compose does not own its IPAM and must not replace it.
+# There is no proxy network in this project.
+#
+###############################################################################
+
+networks:
+  ha-internal:
+    name: ha-internal
+    external: true

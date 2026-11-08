@@ -1,0 +1,391 @@
+# Návrh pro Infrastructure-netcup. Do toho repozitáře se nezapisuje.
+#
+# Vzor Home Assistantu je configs/traefik/dynamic/nextcloudGr.yml:
+#   entrypoint websecure, Host, letsencrypt, passHostHeader,
+#   vlastní headers bez frameDeny, COOP a CORP,
+#   existující crowdsec, rate-limit a compress,
+#   žádný Authentik ForwardAuth.
+#
+# Backend Home Assistantu je WireGuard adresa fyzického hostitele
+# domaPc, http://10.110.100.100:8123. Není to LAN IP Incus kontejneru.
+# MikroTik DNAT z této adresy na kontejner je mimo tento diff.
+#
+# traefik.yml:
+#   :8445 je entrypoint prometheus a nemění se.
+#   Přidává se jen :8456 pro ESPHome.
+#   Zigbee2MQTT na :8445 by zakryl PathPrefix(/) Promethea.
+#   Návrh pro něj používá volný :8452. Ten řádek lze odmítnout
+#   a zvolit jiný volný port. :8445 se do diffu nezapisuje.
+#
+# compose/10-traefik.yml publikuje nové porty na 10.10.10.10.
+# Bez toho entrypoint z wg1 není dostupný.
+#
+# HAProxy pro homeassistant.serveftp.org v diffu není.
+# Dnes míří na 10.100.100.100:22080 a :22443.
+# Nextcloud už míří na 10.10.10.10:80 a :443 se send-proxy-v2.
+
+diff --git a/compose/10-traefik.yml b/compose/10-traefik.yml
+--- a/compose/10-traefik.yml
++++ b/compose/10-traefik.yml
+@@ -85,6 +85,8 @@ services:
+       - "10.10.10.10:8449:8449"
+       - "10.10.10.10:8450:8450"
+       - "10.10.10.10:8451:8451"
++      - "10.10.10.10:8452:8452"
++      - "10.10.10.10:8456:8456"
+       #
+       # Administration traefik
+       #
+diff --git a/configs/traefik/traefik.yml b/configs/traefik/traefik.yml
+--- a/configs/traefik/traefik.yml
++++ b/configs/traefik/traefik.yml
+@@ -169,6 +169,20 @@ entryPoints:
+ 
+   smb-mgmt-virtPc:
+     address: ":8451"
+ 
++  ###########################################################################
++  # Zigbee2MQTT on domaPc (WireGuard only)
++  # :8445 remains the Prometheus entrypoint.
++  ###########################################################################
++
++  zigbee2mqtt:
++    address: ":8452"
++
++  ###########################################################################
++  # ESPHome dashboard on domaPc (WireGuard only)
++  ###########################################################################
++
++  esphome:
++    address: ":8456"
++
+   ###########################################################################
+   # Metrics (internal Docker network only, not published to the host)
+   ###########################################################################
+diff --git a/configs/traefik/dynamic/homeassistant-domapc.yml b/configs/traefik/dynamic/homeassistant-domapc.yml
+--- a/configs/traefik/dynamic/homeassistant-domapc.yml
++++ b/configs/traefik/dynamic/homeassistant-domapc.yml
+@@ -0,0 +1,289 @@
++###############################################################################
++#
++# Infrastructure-netcup Project
++#
++# File:
++#   configs/traefik/dynamic/homeassistant-domapc.yml
++#
++# Description:
++#   Central Traefik route to Home Assistant running behind
++#   WireGuard wg2. Same shape as nextcloudGr.yml.
++#
++# Backend:
++#
++#   Home Assistant
++#   IP:   10.110.100.100
++#   Port: 8123
++#
++#   10.110.100.100 is the WireGuard address of the physical
++#   host domaPc. It is not the Incus container. MikroTik DNAT
++#   sends this port to the container LAN address. That address
++#   is filled in only after it is read on domaPc.
++#
++# Public hostname:
++#
++#   homeassistant.serveftp.org
++#
++# Authentication:
++#
++#   Home Assistant keeps its own login. This router does not
++#   use Authentik ForwardAuth. The Companion App, WebSocket,
++#   REST API, long-lived tokens and integrations have no
++#   Authentik browser session.
++#
++# Headers:
++#
++#   public-chain is not used. Its frameDeny, COOP and CORP
++#   headers break the same class of client that nextcloud-chain
++#   protects. homeassistant-chain keeps CrowdSec, rate limiting
++#   and compression from public-chain and uses
++#   homeassistant-headers instead of headers-default and
++#   headers-security.
++#
++# Zigbee2MQTT and ESPHome use the smb-mgmt-virtPc pattern:
++#   dedicated entrypoint, Authentik ForwardAuth, and a
++#   higher-priority outpost router without ForwardAuth.
++#   Their backends are also 10.110.100.100, ports 8080 and 6052.
++#
++###############################################################################
++
++http:
++
++  ###########################################################################
++  # Router
++  ###########################################################################
++
++  routers:
++
++    homeassistant-domapc:
++
++      entryPoints:
++
++        - websecure
++
++      rule: "Host(`homeassistant.serveftp.org`)"
++
++      service: homeassistant-domapc
++
++      middlewares:
++
++        - homeassistant-chain
++
++      tls:
++
++        certResolver: letsencrypt
++
++    zigbee2mqtt-domapc:
++
++      entryPoints:
++
++        - zigbee2mqtt
++
++      rule: "PathPrefix(`/`)"
++
++      service: zigbee2mqtt-domapc
++
++      middlewares:
++
++        - zigbee2mqtt-domapc-authentik-chain
++
++      tls:
++
++        options: default
++
++      priority: 1
++
++    zigbee2mqtt-domapc-authentik-outpost:
++
++      entryPoints:
++
++        - zigbee2mqtt
++
++      rule: "PathPrefix(`/outpost.goauthentik.io/`)"
++
++      service: authentik
++
++      middlewares:
++
++        - zigbee2mqtt-domapc-outpost-chain
++
++      tls:
++
++        options: default
++
++      priority: 100
++
++    esphome-domapc:
++
++      entryPoints:
++
++        - esphome
++
++      rule: "PathPrefix(`/`)"
++
++      service: esphome-domapc
++
++      middlewares:
++
++        - esphome-domapc-authentik-chain
++
++      tls:
++
++        options: default
++
++      priority: 1
++
++    esphome-domapc-authentik-outpost:
++
++      entryPoints:
++
++        - esphome
++
++      rule: "PathPrefix(`/outpost.goauthentik.io/`)"
++
++      service: authentik
++
++      middlewares:
++
++        - esphome-domapc-outpost-chain
++
++      tls:
++
++        options: default
++
++      priority: 100
++
++  ###########################################################################
++  # Service
++  ###########################################################################
++
++  services:
++
++    homeassistant-domapc:
++
++      loadBalancer:
++
++        passHostHeader: true
++
++        servers:
++
++          - url: "http://10.110.100.100:8123"
++
++    zigbee2mqtt-domapc:
++
++      loadBalancer:
++
++        passHostHeader: true
++
++        servers:
++
++          - url: "http://10.110.100.100:8080"
++
++    esphome-domapc:
++
++      loadBalancer:
++
++        passHostHeader: true
++
++        servers:
++
++          - url: "http://10.110.100.100:6052"
++
++  ###########################################################################
++  # Middleware
++  ###########################################################################
++
++  middlewares:
++
++    #########################################################################
++    # Chain
++    #########################################################################
++
++    homeassistant-chain:
++
++      chain:
++
++        middlewares:
++
++          #
++          # Headers that leave framing, COOP and CORP
++          # to Home Assistant.
++          #
++          - homeassistant-headers
++
++          #
++          # CrowdSec protection.
++          #
++          - crowdsec
++
++          #
++          # Shared request rate limit.
++          #
++          - rate-limit
++
++          #
++          # Enable response compression.
++          # Traefik does not compress a WebSocket upgrade.
++          #
++          - compress
++
++    #########################################################################
++    # Headers
++    #########################################################################
++
++    homeassistant-headers:
++
++      headers:
++
++        contentTypeNosniff: true
++
++        browserXssFilter: true
++
++        referrerPolicy: "strict-origin-when-cross-origin"
++
++        stsSeconds: 31536000
++
++        stsIncludeSubdomains: true
++
++        stsPreload: true
++
++        #
++        # Treat X-Forwarded-Proto: https as HTTPS.
++        # Same signal as headers-security and nextcloud-headers.
++        #
++        sslProxyHeaders:
++
++          X-Forwarded-Proto: https
++
++        #
++        # camera and microphone stay allowed, as in
++        # nextcloud-headers. headers-security disables both.
++        #
++        permissionsPolicy: >-
++          accelerometer=(),
++          geolocation=(),
++          gyroscope=(),
++          magnetometer=(),
++          payment=(),
++          usb=(),
++          interest-cohort=()
++
++        customResponseHeaders:
++
++          X-Robots-Tag: "noindex,nofollow"
++
++          Server: ""
++
++          X-Permitted-Cross-Domain-Policies: "none"
++
++    zigbee2mqtt-domapc-authentik-chain:
++
++      chain:
++
++        middlewares:
++
++          - ip-whitelist
++          - headers-default
++          - headers-security
++          - compress
++          - authentik-forward-auth
++
++    zigbee2mqtt-domapc-outpost-chain:
++
++      chain:
++
++        middlewares:
++
++          - ip-whitelist
++          - headers-default
++          - headers-security
++          - compress
++
++    esphome-domapc-authentik-chain:
++
++      chain:
++
++        middlewares:
++
++          - ip-whitelist
++          - headers-default
++          - headers-security
++          - compress
++          - authentik-forward-auth
++
++    esphome-domapc-outpost-chain:
++
++      chain:
++
++        middlewares:
++
++          - ip-whitelist
++          - headers-default
++          - headers-security
++          - compress

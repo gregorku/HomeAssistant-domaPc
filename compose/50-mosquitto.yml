@@ -1,0 +1,48 @@
+###############################################################################
+#
+# Mosquitto for Home Assistant. Port 1883 is for LAN devices.
+# The entrypoint writes the password file from MQTT_PASSWORD.
+# The password is not placed on the container command line.
+#
+###############################################################################
+
+services:
+  mosquitto:
+    image: ${MOSQUITTO_IMAGE:?MOSQUITTO_IMAGE}
+    container_name: ha-mosquitto
+    hostname: ha-mosquitto
+    user: "0:0"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      TZ: ${TZ}
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+    entrypoint:
+      - /bin/sh
+      - /usr/local/bin/ha-entrypoint.sh
+    ports:
+      # LAN devices such as LilyGO. Not a route from the VPS.
+      - "1883:1883"
+    volumes:
+      - ../configs/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ../configs/mosquitto/entrypoint.sh:/usr/local/bin/ha-entrypoint.sh:ro
+      - ${DATA_DIR}/mosquitto/data:/mosquitto/data
+      - ${DATA_DIR}/mosquitto/log:/mosquitto/log
+      - ${DATA_DIR}/mosquitto/auth:/mosquitto/config/auth
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mosquitto_pub -h 127.0.0.1 -u "$$MQTT_USER" -P "$$MQTT_PASSWORD" -t ha/health -m up
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - ha-internal
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE}
+        max-file: "${LOG_MAX_FILES}"
