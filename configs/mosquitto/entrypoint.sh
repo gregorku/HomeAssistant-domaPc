@@ -16,7 +16,16 @@ if [ -f "${auth}/passwd.sha256" ]; then
 fi
 
 if [ ! -s "${auth}/passwd" ] || [ "${old}" != "${sum}" ]; then
-    mosquitto_passwd -b -c "${auth}/passwd" "${MQTT_USER}" "${MQTT_PASSWORD}"
+    plain="$(mktemp "${auth}/plain.XXXXXX")"
+    chmod 600 "${plain}"
+    # printf is a shell builtin, so the password is not a process argument.
+    # mosquitto_passwd -U reads that file and replaces it with a hash.
+    printf '%s:%s\n' "${MQTT_USER}" "${MQTT_PASSWORD}" > "${plain}"
+    if ! mosquitto_passwd -U "${plain}" >/dev/null; then
+        rm -f "${plain}"
+        exit 1
+    fi
+    mv "${plain}" "${auth}/passwd"
     chmod 600 "${auth}/passwd"
     printf '%s\n' "${sum}" > "${auth}/passwd.sha256"
     chmod 600 "${auth}/passwd.sha256"

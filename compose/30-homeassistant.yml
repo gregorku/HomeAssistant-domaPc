@@ -1,7 +1,7 @@
 ###############################################################################
 #
 # Home Assistant. Port 8123 is published on the Incus container so
-# 10.110.100.100 is the WireGuard address of the physical host.
+# 10.100.100.100 is the WireGuard address of the physical host.
 # MikroTik DNAT sends port 8123 to this container's LAN address.
 #
 ###############################################################################

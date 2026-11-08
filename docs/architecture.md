@@ -1,81 +1,49 @@
 # Architektura
 
-Vzor připojení je Nextcloud-Gr. Infrastructure-Nextcloud-Lu tím vzorem není: má vlastní Traefik v aplikačním stacku. HomeAssistant-domaPc ho nemá.
+HomeAssistant-domaPc je aplikační stack. Traefik, CrowdSec a Authentik běží v Infrastructure-netcup a tento projekt je neinstaluje.
 
-Ověřená cesta Nextcloudu:
+## Cesta na domaPc
 
-```text
-Internet
-  -> HAProxy na VPS, SNI gregor.serveftp.org
-  -> Traefik 10.10.10.10:443, entrypoint websecure, PROXY protocol
-  -> router nextcloud-gr, TLS letsencrypt, bez Authentik ForwardAuth
-  -> http://10.110.100.12:8080
-```
-
-`10.110.100.12` je v `wireguard-peers.nix` MikroTik prace, peer wg2 s `allowedIPs = 10.110.100.12/32`. Není to adresa Incus kontejneru. Nginx v kontejneru poslouchá na `192.168.12.232:8080`. VPS na `192.168.12.0/24` routu nemá. Mezi `10.110.100.12:8080` a tou LAN adresou je DNAT na MikroTiku a v tomto Gitu není.
-
-## Stejná cesta pro domaPc
-
-`10.110.100.100` je WireGuard adresa fyzického hostitele domaPc. Incus kontejner HomeAssistant-domaPc poběží na tomto hostiteli. Výchozí profil Incus dává kontejneru `eth0` na bridge `br0`. `incusbr0` (`10.10.10.0/24`) je NAT síť a výchozí profil ji nepoužívá. VPS má v `allowedIPs` jen `10.110.100.100/32`, takže Traefik vidí hostitele a LAN adresu kontejneru přímo nevidí.
+`10.100.100.100` je WireGuard adresa fyzického hostitele domaPc. Incus kontejner HomeAssistant-domaPc poběží na tomto hostiteli. Traefik na ni posílá provoz přes WireGuard wg1. Adresa hostitele není adresa Incus kontejneru. MikroTik DNAT do této cesty nepatří, dokud nebude ověřené skutečné síťové zapojení.
 
 ```text
-Internet
-  -> HAProxy na VPS, SNI homeassistant.serveftp.org
-  -> Traefik 10.10.10.10:443, entrypoint websecure
-  -> WireGuard wg2
-  -> domaPc 10.110.100.100
-  -> MikroTik DNAT
-  -> LAN IP Incus kontejneru, port 8123
-  -> Docker služba Home Assistant
+VPS Traefik
+  -> WireGuard wg1
+  -> domaPc 10.100.100.100
+  -> Docker služba
 ```
 
-Port se nemapuje na jiné číslo. `8123` je port procesu i port na adrese hostitele. LAN IP kontejneru se doplní až po ověření na domaPc. Z tohoto checkoutu na `ntbLenovo` ověřit nešla: místní `incus list` je prázdný a není to hostitel domaPc. Historické ani cizí adresy se do DNAT neplní.
-
-`HA_TRUSTED_PROXY=10.110.100.1` je adresa wg2 na VPS. Nextcloud má stejnou hodnotu jako `TRUSTED_PROXIES=10.110.100.1/32`. Při DNAT bez SNAT je to zdroj, který kontejner uvidí.
-
-## DNAT na MikroTiku
-
-Pravidla se zatím nezapisují. Cíl `to-addresses` je LAN IP Incus kontejneru ověřená na domaPc. V přehledu je `<LAN-IP-KONTEJNERU>`.
-
-| Provoz | Příchozí adresa hostitele | Cíl po DNAT | Proč |
+| Služba | Vstup na VPS | Backend | Autentizace |
 | --- | --- | --- | --- |
-| Home Assistant | `10.110.100.100:8123` TCP | `<LAN-IP-KONTEJNERU>:8123` | Traefik, entrypoint `websecure` |
-| Zigbee2MQTT | `10.110.100.100:8080` TCP | `<LAN-IP-KONTEJNERU>:8080` | Traefik, publikovaný port kontejneru |
-| ESPHome | `10.110.100.100:6052` TCP | `<LAN-IP-KONTEJNERU>:6052` | Traefik. Proces poslouchá na síti kontejneru, Compose port nemapuje |
+| Home Assistant | port 443, entrypoint `websecure`, `homeassistant.serveftp.org` | `http://10.100.100.100:8123` | vlastní přihlášení Home Assistantu, bez Authentik ForwardAuth |
+| Zigbee2MQTT | port 8455, entrypoint `zigbee2mqtt-domapc` | `http://10.100.100.100:8080` | stávající Authentik-netcup, ForwardAuth |
+| ESPHome | port 8456, entrypoint `esphome-domapc` | `http://10.100.100.100:6052` | stávající Authentik-netcup, ForwardAuth |
 
-PostgreSQL, Mosquitto a WMBusmeters v této tabulce nejsou. PostgreSQL a WMBusmeters nemají port na hostiteli. Mosquitto `1883` používají zařízení v LAN přímo na LAN IP kontejneru. Do wg2 se broker nepublikuje.
+Prometheus zůstává na portu `8445`. Jeho router se nemění. Nový Authentik se nezakládá a soubor Authentik-netcup se neupravuje. Zigbee2MQTT a ESPHome používají existující Embedded Outpost, `ip-whitelist`, `headers-default`, `headers-security` a `compress`. Outpost router má vyšší prioritu a ForwardAuth nemá. Služba `authentik` se sdílí z existujícího `authentik.yml`.
 
-```routeros
-/ip firewall nat
-add chain=dstnat protocol=tcp dst-address=10.110.100.100 dst-port=8123 \
-    action=dst-nat to-addresses=<LAN-IP-KONTEJNERU> to-ports=8123
-add chain=dstnat protocol=tcp dst-address=10.110.100.100 dst-port=8080 \
-    action=dst-nat to-addresses=<LAN-IP-KONTEJNERU> to-ports=8080
-add chain=dstnat protocol=tcp dst-address=10.110.100.100 dst-port=6052 \
-    action=dst-nat to-addresses=<LAN-IP-KONTEJNERU> to-ports=6052
-```
+`HA_TRUSTED_PROXY` zůstává `10.110.100.1`, dokud se na domaPc neověří adresa, kterou Home Assistant uvidí jako bezprostřední proxy. Není to adresa hostitele `10.100.100.100`.
 
 ## Služby
 
 | Kontejner | Port procesu | Backend pro Traefik na VPS |
 | --- | --- | --- |
-| `ha-homeassistant` | 8123 | `http://10.110.100.100:8123`, entrypoint `websecure` |
-| `ha-zigbee2mqtt` | 8080 | `http://10.110.100.100:8080`, samostatný entrypoint |
-| `ha-esphome` | 6052 na síti kontejneru | `http://10.110.100.100:6052`, entrypoint `:8456` |
+| `ha-homeassistant` | 8123 | `http://10.100.100.100:8123`, entrypoint `websecure` |
+| `ha-zigbee2mqtt` | 8080 | `http://10.100.100.100:8080`, entrypoint `zigbee2mqtt-domapc` `:8455` |
+| `ha-esphome` | 6052 na síti kontejneru | `http://10.100.100.100:6052`, entrypoint `esphome-domapc` `:8456` |
 | `ha-postgresql` | 5432 jen v `ha-internal` | žádný |
 | `ha-mosquitto` | 1883 na kontejneru | žádný, jen LAN |
 | `ha-wmbusmeters` | žádný | čte MQTT v `ha-internal` |
 
 ESPHome má `network_mode: host`, takže `6052` poslouchá přímo na `br0` kontejneru. Samostatné mapování portu nepotřebuje.
 
-Entrypoint `:8445` je `prometheus` a router `PathPrefix(/)` na Monitoring-netcup `10.10.10.11:9090`. Druhý router na tom entrypointu by ho zakryl. Návrh ho nemění. ESPHome dostane nový entrypoint `:8456`. Pro Zigbee2MQTT je v návrhu volný `:8452`, dokud se nezvolí jiný volný port.
+Entrypoint `:8445` zůstává Prometheu. Zigbee2MQTT má na VPS entrypoint `zigbee2mqtt-domapc` na portu `:8455`. ESPHome má entrypoint `esphome-domapc` na portu `:8456`. Oba už jsou ve statickém `traefik.yml` Infrastructure-netcup. Návrh je znovu nepřidává.
 
 ## Middleware Home Assistantu
 
 `public-chain` se nepoužije. `headers-default` a `headers-security` nastavují `frameDeny`, COOP a CORP. Nextcloud-Gr kvůli nim má vlastní `nextcloud-headers` a k nim existující `crowdsec`, `rate-limit` a `compress`. Home Assistant má stejný řetěz pod vlastními jmény. Authentik ForwardAuth v něm není. `passHostHeader: true` a `sslProxyHeaders` pro `X-Forwarded-Proto: https` jsou stejné jako u Nextcloudu. Komprese WebSocket upgrade nepřebírá.
 
-Zigbee2MQTT a ESPHome jdou přes existující `ip-whitelist`, `headers-default`, `headers-security`, `compress` a `authentik-forward-auth`, se samostatným outpost routerem bez ForwardAuth. Vzor je `smb-mgmt-virtPc.yml`.
+Zigbee2MQTT a ESPHome používají existující Authentik-netcup. Řetěz je `ip-whitelist`, `headers-default`, `headers-security`, `compress` a `authentik-forward-auth`. Outpost `/outpost.goauthentik.io/` má prioritu 100 a ForwardAuth v něm není. Nová definice Authentiku v návrhu není.
 
 ## Co v tomto repozitáři není
 
-HAProxy dnes posílá `homeassistant.serveftp.org` na `10.100.100.100:22080` a `:22443`. Nextcloud už jde na Traefik `10.10.10.10:80` a `:443` s `send-proxy-v2`. Stejný cíl HAProxy je podmínka toho, aby nový router vůbec dostal provoz. Ta úprava je v NixOS a v návrhu Traefiku není. DNAT na MikroTiku doma tam také není.
+Návrh Traefiku je v [infrastructure-netcup.diff](infrastructure-netcup.diff). Do Infrastructure-netcup se nezapisuje. Statické porty `8455` a `8456` se znovu nepřidávají. Prometheus na `8445` v něm není. MikroTik DNAT v návrhu není.

@@ -27,8 +27,13 @@ static_checks() {
         scripts/config.sh
         scripts/lib/logging.sh
         scripts/lib/common.sh
-        scripts/lib/env.sh
-        scripts/lib/deploy.sh
+        scripts/lib/env/load.sh
+        scripts/lib/deploy/load.sh
+        scripts/lib/checks/load.sh
+        scripts/lib/init/load.sh
+        scripts/lib/post-deploy/checks.sh
+        scripts/lib/backup/archive.sh
+        scripts/migrate-postgres.sh
         compose.yml
         compose/30-homeassistant.yml
         compose/40-postgresql.yml
@@ -79,9 +84,20 @@ static_checks() {
     grep -q 'Apator04799531' "${REPO_ROOT}/configs/wmbusmeters/entrypoint.sh" \
         && grep -q 'Apator04806798' "${REPO_ROOT}/configs/wmbusmeters/entrypoint.sh" \
         || fail_static "the original Apator meters are missing"
-    if grep -R -n -E '10\.110\.100\.100:' "${REPO_ROOT}/compose" "${REPO_ROOT}/configs"; then
-        fail_static "a compose port is bound to the MikroTik wg2 address"
+    if grep -R -n -E '10\.110\.100\.100|8452' \
+        "${REPO_ROOT}/compose" "${REPO_ROOT}/configs" "${REPO_ROOT}/scripts" \
+        "${REPO_ROOT}/docs" "${REPO_ROOT}/README.md" "${REPO_ROOT}/.env.example" \
+        --exclude infrastructure-netcup.diff --exclude test.sh; then
+        fail_static "an old host address or Zigbee port 8452 is still present"
     fi
+    grep -q 'privileged: true' "${REPO_ROOT}/compose/70-esphome.yml" \
+        && fail_static "ESPHome is still privileged"
+    grep -q 'internal_url:' "${REPO_ROOT}/configs/homeassistant/configuration.yaml" \
+        && fail_static "internal_url is set without a verified LAN address"
+    grep -q 'mosquitto_passwd -b' "${REPO_ROOT}/configs/mosquitto/entrypoint.sh" \
+        && fail_static "Mosquitto still receives the password as a process argument"
+    grep -q 'PG_SUPER_PASS' "${REPO_ROOT}/compose/40-postgresql.yml" \
+        || fail_static "PostgreSQL superuser password is not separate"
     grep -q '^\.env$' "${REPO_ROOT}/.gitignore" || fail_static ".env is not ignored"
     grep -q '^set_postgres_password$' <(sed -n 's/^PG_PASS=//p' "${REPO_ROOT}/.env.example") \
         || fail_static "PG_PASS example is not a placeholder"
@@ -94,32 +110,59 @@ static_checks() {
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/lib/common.sh"
     # shellcheck disable=SC1091
-    source "${SCRIPT_DIR}/lib/env.sh"
+    source "${SCRIPT_DIR}/lib/env/load.sh"
     # shellcheck disable=SC1091
-    source "${SCRIPT_DIR}/lib/deploy.sh"
+    source "${SCRIPT_DIR}/lib/deploy/load.sh"
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/lib/backup/archive.sh"
 
     check_env_sync_preserves_secrets
     check_network_rules
     check_deploy_database_order
+    check_archive_roundtrip
     ok "Static checks passed. Containers were not started."
 }
 
+check_archive_roundtrip() {
+    local stage archive work tree
+    stage="$(mktemp -d)"
+    archive="$(mktemp)"
+    work="$(mktemp -d)"
+    mkdir -p "${stage}/postgresql" "${stage}/homeassistant" "${stage}/mosquitto" \
+        "${stage}/zigbee2mqtt" "${stage}/esphome" "${stage}/wmbusmeters"
+    printf 'PGDMP' > "${stage}/postgresql/homeassistant.dump"
+    printf 'config\n' > "${stage}/homeassistant/configuration.yaml"
+    printf 'auth\n' > "${stage}/mosquitto/passwd"
+    printf 'zigbee\n' > "${stage}/zigbee2mqtt/database.db"
+    printf 'esphome\n' > "${stage}/esphome/device.yaml"
+    printf 'wmbus\n' > "${stage}/wmbusmeters/publish_mqtt.sh"
+    backup_write_manifest "${stage}" "test" "postgres:18.6" "2026.11.0"
+    backup_pack "${stage}" "${archive}"
+    backup_verify_archive "${archive}" "${work}"
+    cmp -s "${stage}/homeassistant/configuration.yaml" "${work}/homeassistant/configuration.yaml" \
+        || fail_static "isolated archive extract changed Home Assistant config"
+    rm -rf "${stage}" "${work}" "${archive}" "${archive}.sha256"
+    ok "Archive checksum and isolated extract passed"
+}
+
 check_env_sync_preserves_secrets() {
-    local dir example current first mqtt esp restic output
+    local dir example current first super mqtt esp output
     dir="$(mktemp -d)"
     example="${REPO_ROOT}/.env.example"
     current="${dir}/runtime.env"
     output="${dir}/sync.out"
     env_sync_file "${example}" "${current}" > "${output}"
+    super="$(sed -n 's/^PG_SUPER_PASS=//p' "${current}")"
     first="$(sed -n 's/^PG_PASS=//p' "${current}")"
     mqtt="$(sed -n 's/^MQTT_PASSWORD=//p' "${current}")"
     esp="$(sed -n 's/^ESPHOME_PASSWORD=//p' "${current}")"
-    restic="$(sed -n 's/^RESTIC_PASSWORD=//p' "${current}")"
+    [[ "${#super}" -ge 16 && "${super}" != set_* ]] || fail_static "PG_SUPER_PASS was not generated"
     [[ "${#first}" -ge 16 && "${first}" != set_* ]] || fail_static "PG_PASS was not generated"
+    [[ "${super}" != "${first}" ]] || fail_static "superuser and application passwords are the same"
+    [[ -z "$(sed -n 's/^RESTIC_PASSWORD=//p' "${current}")" ]] || fail_static "RESTIC_PASSWORD was generated"
     [[ "${#mqtt}" -ge 16 && "${mqtt}" != set_* ]] || fail_static "MQTT_PASSWORD was not generated"
     [[ "${#esp}" -ge 16 && "${esp}" != set_* ]] || fail_static "ESPHOME_PASSWORD was not generated"
-    [[ "${#restic}" -ge 16 && "${restic}" != set_* ]] || fail_static "RESTIC_PASSWORD was not generated"
-    if grep -F -q -e "${first}" -e "${mqtt}" -e "${esp}" -e "${restic}" "${output}"; then
+    if grep -F -q -e "${super}" -e "${first}" -e "${mqtt}" -e "${esp}" "${output}"; then
         fail_static "update of .env printed a generated secret"
     fi
     [[ "$(stat -c '%a' "${current}")" == 600 ]] || fail_static "runtime .env is not mode 600"
@@ -140,11 +183,12 @@ check_env_sync_preserves_secrets() {
 
 check_network_rules() {
     env_validate_subnet_pair "DOCKER_INTERNAL" "172.31.0.0/24" "172.31.0.1"
-    if env_ip_private "${DOMA_WG2_ADDRESS}"; then
+    if env_ip_private "${DOMA_HOST_ADDRESS}"; then
         :
     else
-        fail_static "the MikroTik wg2 address was not recognized as private"
+        fail_static "the domaPc host address was not recognized as private"
     fi
+    [[ "${DOMA_HOST_ADDRESS}" == "10.100.100.100" ]] || fail_static "the domaPc host address changed"
     encoded="$(env_urlencode 'a+b/c=')"
     [[ "${encoded}" == "a%2Bb%2Fc%3D" ]] || fail_static "database password URL encoding changed"
     ok "Network and secret encoding rules passed"

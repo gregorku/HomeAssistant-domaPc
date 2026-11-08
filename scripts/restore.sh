@@ -4,16 +4,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/config.sh"
 source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/common.sh"
-source "${SCRIPT_DIR}/lib/env.sh"
+source "${SCRIPT_DIR}/lib/checks/load.sh"
+source "${SCRIPT_DIR}/lib/env/load.sh"
+source "${SCRIPT_DIR}/lib/backup/archive.sh"
 
 archive=""
-identity=""
+target=""
 replace=0
 confirm=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --archive) archive="$2"; shift 2 ;;
-        --identity) identity="$2"; shift 2 ;;
+        --target) target="$2"; shift 2 ;;
         --replace-data) replace=1; shift ;;
         --confirm) confirm="$2"; shift 2 ;;
         *) fail "Unknown option: $1" ;;
@@ -21,66 +23,83 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "${archive}" && "${confirm}" == "${STACK_NAME}" ]] \
-    || fail "Usage: ./scripts/restore.sh --archive PATH --confirm ${STACK_NAME} [--identity KEY] [--replace-data]"
-[[ -f "${archive}" ]] || fail "Archive does not exist: ${archive}"
+    || fail "Usage: ./scripts/restore.sh --archive PATH --confirm ${STACK_NAME} [--target DIR | --replace-data]"
+[[ "${replace}" -eq 0 || -z "${target}" ]] || fail "Use either --target or --replace-data."
+[[ "${replace}" -eq 1 || -n "${target}" ]] || fail "The first restore needs --target DIR and does not change production data."
 
-print_header "Restore check"
+print_header "Restore"
 check_environment
 env_load_runtime
 
 work="$(mktemp -d)"
 chmod 700 "${work}"
-cleanup() { rm -rf "${work}"; }
-trap cleanup EXIT
-
-source_tar="${archive}"
-if [[ "${archive}" == *.age ]]; then
-    [[ -n "${identity}" && -f "${identity}" ]] || fail "An age archive needs --identity before any data is changed."
-    require_command age
-    age -d -i "${identity}" -o "${work}/archive.tar" "${archive}"
-    source_tar="${work}/archive.tar"
+trap 'rm -rf "${work}"' EXIT
+backup_verify_archive "${archive}" "${work}/checked"
+if [[ "${replace}" -eq 1 ]]; then
+    docker exec -i "${POSTGRESQL_CONTAINER}" pg_restore -l < "${work}/checked/$(backup_dump_member)" >/dev/null \
+        || fail "pg_restore cannot list the dump. Production data was not changed."
+elif command -v pg_restore >/dev/null 2>&1; then
+    backup_list_dump "${work}/checked/$(backup_dump_member)"
+else
+    warn "pg_restore is not installed here. Dump listing was not run. The PGDMP header was checked."
 fi
-tar -tf "${source_tar}" | grep -qx "homeassistant.dump"
-tar -xOf "${source_tar}" homeassistant.dump > "${work}/homeassistant.dump"
-dump_head="$(od -An -tx1 -N5 "${work}/homeassistant.dump" | tr -d ' \n')"
-[[ "${dump_head}" == "5047444d50" ]] \
-    || fail "The dump is not a PostgreSQL custom archive. Live data was not changed."
-if tar -tf "${source_tar}" | grep -qx "SHA256SUMS"; then
-    tar -xOf "${source_tar}" SHA256SUMS > "${work}/SHA256SUMS"
-    (
-        cd "${work}"
-        sha256sum -c SHA256SUMS
-    )
-fi
-ok "Archive is readable and the dump has a PGDMP header."
+ok "Archive and checksums passed."
 
-if [[ "${replace}" -ne 1 ]]; then
-    warn "No data was changed. Re-run with --replace-data after this check succeeds."
-    exit 2
+if [[ -n "${target}" ]]; then
+    [[ "${target}" == /* && "${target}" != "/" ]] || fail "Restore target must be an absolute directory."
+    case "${target}" in
+        "${DATA_DIR}"|"${DATA_DIR}"/*|"${STACK_DIR}"|"${STACK_DIR}"/*|"${GIT_DIR}"|"${GIT_DIR}"/*|"${BACKUP_LOCAL_DIR}"|"${BACKUP_LOCAL_DIR}"/*|"${RUNTIME_ENV[POSTGRESQL_HOST_DIR]}"|"${RUNTIME_ENV[POSTGRESQL_HOST_DIR]}"/*)
+            fail "Refusing to extract into production data, the stack, Git or PostgreSQL."
+            ;;
+    esac
+    mkdir -p "${target}"
+    find "${target}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    cp -a "${work}/checked/." "${target}/"
+    ok "Archive extracted to ${target}. Production data was not changed."
+    print_footer "Isolated restore completed."
+    exit 0
 fi
 
 require_command docker
-docker stop "${HA_CONTAINER}" "${MOSQUITTO_CONTAINER}" >/dev/null
-docker exec -i -e PGPASSWORD="${RUNTIME_ENV[PG_PASS]}" "${POSTGRESQL_CONTAINER}" \
-    pg_restore -U "${RUNTIME_ENV[PG_USER]}" -d "${RUNTIME_ENV[PG_DB]}" --clean --if-exists \
-    < "${work}/homeassistant.dump"
-config_dir="${RUNTIME_ENV[HA_CONFIG_HOST_DIR]}"
-mkdir -p "${config_dir}"
-if tar -tf "${source_tar}" | grep -qx "homeassistant/configuration.yaml"; then
-    tar -C "${work}" -xf "${source_tar}" homeassistant/configuration.yaml
-    cp -a "${work}/homeassistant/configuration.yaml" "${config_dir}/configuration.yaml"
-fi
-if tar -tf "${source_tar}" | grep -qx "homeassistant/secrets.yaml"; then
-    tar -C "${work}" -xf "${source_tar}" homeassistant/secrets.yaml
-    cp -a "${work}/homeassistant/secrets.yaml" "${config_dir}/secrets.yaml"
-    chmod 600 "${config_dir}/secrets.yaml"
-fi
-if tar -tf "${source_tar}" | grep -q '^mosquitto/'; then
-    mkdir -p "${DATA_DIR}/mosquitto/auth"
-    tar -C "${work}" -xf "${source_tar}" mosquitto
-    cp -a "${work}/mosquitto/." "${DATA_DIR}/mosquitto/auth/"
-    chmod 700 "${DATA_DIR}/mosquitto/auth"
-    chmod 600 "${DATA_DIR}/mosquitto/auth/passwd" "${DATA_DIR}/mosquitto/auth/passwd.sha256" 2>/dev/null || true
-fi
-ok "Database restore finished. Review Home Assistant before starting it again."
-print_footer "Home Assistant and Mosquitto were left stopped."
+version="$(docker exec "${POSTGRESQL_CONTAINER}" psql -U "${POSTGRES_BOOTSTRAP_USER}" -d "${RUNTIME_ENV[PG_DB]}" -Atc 'SHOW server_version')"
+[[ "${version}" == 18.* ]] || fail "Running PostgreSQL is ${version}. Refusing to restore a dump into a server that is not 18."
+
+print_section "Safety backup"
+"${SCRIPT_DIR}/backup.sh"
+
+stop_names=(
+    "${HA_CONTAINER}"
+    "${ZIGBEE2MQTT_CONTAINER}"
+    "${ESPHOME_CONTAINER}"
+    "${WMBUSMETERS_CONTAINER}"
+    "${MOSQUITTO_CONTAINER}"
+)
+for name in "${stop_names[@]}"; do
+    docker stop "${name}" >/dev/null 2>&1 || true
+done
+
+restore_tree() {
+    local name="$1" dest="$2"
+    mkdir -p "${dest}"
+    find "${dest}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    cp -a "${work}/checked/${name}/." "${dest}/"
+}
+
+restore_tree homeassistant "${RUNTIME_ENV[HA_CONFIG_HOST_DIR]}"
+restore_tree mosquitto "${DATA_DIR}/mosquitto"
+restore_tree zigbee2mqtt "${RUNTIME_ENV[ZIGBEE2MQTT_HOST_DIR]}"
+restore_tree esphome "${RUNTIME_ENV[ESPHOME_HOST_DIR]}"
+restore_tree wmbusmeters "${RUNTIME_ENV[WMBUSMETERS_HOST_DIR]}"
+chmod 700 "${DATA_DIR}/mosquitto/auth" "${RUNTIME_ENV[WMBUSMETERS_HOST_DIR]}" 2>/dev/null || true
+chmod 600 "${RUNTIME_ENV[HA_CONFIG_HOST_DIR]}/secrets.yaml" 2>/dev/null || true
+
+docker exec -i -e PGPASSWORD="${RUNTIME_ENV[PG_SUPER_PASS]}" "${POSTGRESQL_CONTAINER}" \
+    pg_restore -U "${POSTGRES_BOOTSTRAP_USER}" -d "${RUNTIME_ENV[PG_DB]}" --clean --if-exists --no-owner \
+    < "${work}/checked/$(backup_dump_member)" \
+    || fail "pg_restore failed. Production services were left stopped."
+
+for name in "${stop_names[@]}"; do
+    docker start "${name}" >/dev/null 2>&1 || warn "Could not start ${name}."
+done
+ok "Production data was replaced from the archive and services were started."
+print_footer "Restore completed."

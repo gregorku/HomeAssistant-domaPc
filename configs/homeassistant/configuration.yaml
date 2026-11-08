@@ -5,7 +5,6 @@ default_config:
 
 homeassistant:
   external_url: https://homeassistant.serveftp.org
-  internal_url: http://homeassistant:8123
 
 http:
   use_x_forwarded_for: true

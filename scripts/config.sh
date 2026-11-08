@@ -30,13 +30,14 @@ readonly DEPLOY_ITEMS=(
 
 readonly NETWORK_INTERNAL="ha-internal"
 
-# wg2 address of the VPS. With DNAT and without SNAT this is the
-# address Home Assistant sees as the immediate TCP peer.
+# Current proposal for the address Home Assistant treats as the
+# immediate proxy. It stays until the source address seen by
+# Home Assistant is verified on domaPc. It is not the host address.
 readonly VPS_WG2_ADDRESS="10.110.100.1"
 
-# wg2 address of MikroTik doma. The VPS reaches this address.
+# WireGuard address of the physical host domaPc.
 # It is not the Incus container address.
-readonly DOMA_WG2_ADDRESS="10.110.100.100"
+readonly DOMA_HOST_ADDRESS="10.100.100.100"
 
 readonly HA_DOMAIN="homeassistant.serveftp.org"
 

@@ -4,8 +4,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/config.sh"
 source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/common.sh"
-source "${SCRIPT_DIR}/lib/env.sh"
-source "${SCRIPT_DIR}/lib/deploy.sh"
+source "${SCRIPT_DIR}/lib/checks/load.sh"
+source "${SCRIPT_DIR}/lib/env/load.sh"
+source "${SCRIPT_DIR}/lib/deploy/load.sh"
 
 print_header "Deploy HomeAssistant-domaPc"
 check_environment

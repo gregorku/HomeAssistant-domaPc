@@ -17,7 +17,7 @@ services:
     environment:
       POSTGRES_DB: ${PG_DB}
       POSTGRES_USER: ha_bootstrap
-      POSTGRES_PASSWORD: ${PG_PASS}
+      POSTGRES_PASSWORD: ${PG_SUPER_PASS}
       PGDATA: /var/lib/postgresql/18/docker
       POSTGRES_INITDB_ARGS: --data-checksums
     volumes:

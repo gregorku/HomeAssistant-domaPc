@@ -7,7 +7,7 @@ Po nasazení v kontejneru:
 1. `docker ps` ukazuje `ha-homeassistant`, `ha-postgresql`, `ha-mosquitto`, `ha-zigbee2mqtt`, `ha-esphome` a `ha-wmbusmeters`. Neukazuje Traefik ani CrowdSec.
 2. PostgreSQL nepublikuje port 5432.
 3. Z Incus kontejneru odpovídá `127.0.0.1:8123`, `:8080` a `:6052`.
-4. Z VPS je služba dostupná na `10.110.100.100`. MikroTik DNAT ji předá na LAN IP kontejneru. Tu adresu je potřeba přečíst na domaPc.
+4. Z VPS Traefiku vede cesta přes WireGuard wg1 na `10.100.100.100`. Home Assistant je backend port 8123 na vstupu 443. Zigbee2MQTT je backend 8080 na vstupu 8455. ESPHome je backend 6052 na vstupu 8456. MikroTik DNAT se neověřuje, dokud není zapojení potvrzené.
 5. `post-deploy.sh` nevypíše heslo PostgreSQL, MQTT ani ESPHome.
 
 `docker compose config` se na této stanici nespouštěl. Patří do cílového kontejneru:

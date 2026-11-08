@@ -5,14 +5,12 @@ Aplikační Docker Compose stack pro Incus kontejner na fyzickém hostiteli doma
 ```text
 Internet
   -> HAProxy na VPS
-  -> Traefik, entrypoint websecure
-  -> WireGuard wg2
-  -> domaPc 10.110.100.100
-  -> MikroTik DNAT
-  -> LAN IP Incus kontejneru, port 8123
+  -> Traefik v Infrastructure-netcup
+  -> WireGuard wg1
+  -> domaPc 10.100.100.100
 ```
 
-`10.110.100.100` je WireGuard adresa fyzického hostitele domaPc. Není to adresa Incus kontejneru. LAN adresa kontejneru se bere až z ověření na domaPc.
+`10.100.100.100` je WireGuard adresa fyzického hostitele domaPc. Není to adresa Incus kontejneru. MikroTik DNAT v této cestě není, dokud nebude ověřené skutečné zapojení.
 
 ## Pořadí skriptů
 
@@ -37,6 +35,6 @@ Skripty se spouštějí jako root v kontejneru, z checkoutu repozitáře.
 | `ha-esphome` | ESPHome dashboard, čtyři USB porty | `6052` přes síť kontejneru |
 | `ha-wmbusmeters` | dekódování telegramů z `wmbus/lilygo/telegram` | žádný |
 
-Home Assistant má vlastní přihlášení. Zigbee2MQTT a ESPHome se zvenku otevírají přes Authentik na VPS. Návrh této směrovačky je v [docs/infrastructure-netcup.diff](docs/infrastructure-netcup.diff) a do Infrastructure-netcup se nezapisuje.
+Home Assistant jde na port 443 entrypointu `websecure` a má vlastní přihlášení, bez Authentik ForwardAuth. Zigbee2MQTT je na portu VPS `8455` a ESPHome na `8456`. Obě chrání stávající Authentik-netcup přes Authentik ForwardAuth, Embedded Outpost, `ip-whitelist` a bezpečnostní middleware. Nový Authentik se nezakládá a Authentik-netcup se nemění. Prometheus zůstává na `8445`. Návrh je v [docs/infrastructure-netcup.diff](docs/infrastructure-netcup.diff) a do Infrastructure-netcup se nezapisuje.
 
 Další popis je v [docs/architecture.md](docs/architecture.md), provoz v [docs/operations.md](docs/operations.md), zálohy v [docs/backup-restore.md](docs/backup-restore.md) a ověření v [docs/checks.md](docs/checks.md).
