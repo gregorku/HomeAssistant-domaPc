@@ -17,6 +17,53 @@ prepare_owned_dir() {
     chown "${owner}" "${path}"
 }
 
+deploy_sync_executable() {
+    local source="$1" dest="$2" label="$3"
+    local tmp backup="" stamp n
+    [[ -f "${source}" ]] || fail "Missing source for ${label}."
+    if [[ -L "${dest}" ]]; then
+        fail "${label} target ${dest} is a symbolic link."
+    fi
+    if [[ -e "${dest}" && ! -f "${dest}" ]]; then
+        fail "${label} target ${dest} is not a regular file."
+    fi
+    if [[ -f "${dest}" ]] && cmp -s "${source}" "${dest}"; then
+        return 0
+    fi
+    if [[ -f "${dest}" ]]; then
+        stamp="$(date +%Y%m%dT%H%M%S)"
+        backup="${dest}.${stamp}.bak"
+        n=0
+        while [[ -e "${backup}" ]]; do
+            n=$((n + 1))
+            backup="${dest}.${stamp}.${n}.bak"
+        done
+        cp -a "${dest}" "${backup}" || fail "Could not back up ${label}. Left ${dest} unchanged."
+        if ! chmod 600 "${backup}"; then
+            rm -f "${backup}"
+            fail "Could not protect the backup of ${label}. Left ${dest} unchanged."
+        fi
+    fi
+    tmp="$(mktemp "${dest}.XXXXXX")" || fail "Could not stage ${label}."
+    if ! cp "${source}" "${tmp}"; then
+        rm -f "${tmp}"
+        fail "Could not copy ${label}. Left the previous file unchanged."
+    fi
+    if ! chmod 755 "${tmp}"; then
+        rm -f "${tmp}"
+        fail "Could not set permissions on ${label}. Left the previous file unchanged."
+    fi
+    if ! mv -f "${tmp}" "${dest}"; then
+        rm -f "${tmp}"
+        fail "Could not replace ${label}. Left the previous file unchanged."
+    fi
+    if [[ -n "${backup}" ]]; then
+        ok "Updated ${label}. Previous copy saved as ${backup}."
+    else
+        ok "Seeded ${label}."
+    fi
+}
+
 deploy_prepare_storage() {
     print_section "Persistent storage"
     require_mountpoint "${DOCKER_DATA_DIR}"
@@ -40,10 +87,12 @@ deploy_prepare_storage() {
         chmod 644 "${RUNTIME_ENV[HA_CONFIG_HOST_DIR]}/configuration.yaml"
         ok "Seeded Home Assistant configuration.yaml."
     fi
-    if [[ ! -f "${RUNTIME_ENV[WMBUSMETERS_HOST_DIR]}/publish_mqtt.sh" ]]; then
-        install -m 755 "${WMBUS_PUBLISH_TEMPLATE}" "${RUNTIME_ENV[WMBUSMETERS_HOST_DIR]}/publish_mqtt.sh"
-        ok "Seeded WMBusmeters publish script."
-    fi
+    deploy_sync_executable "${WMBUS_PUBLISH_TEMPLATE}" \
+        "${RUNTIME_ENV[WMBUSMETERS_HOST_DIR]}/publish_mqtt.sh" \
+        "WMBusmeters publish script"
+    deploy_sync_executable "${WMBUS_SUBSCRIBE_TEMPLATE}" \
+        "${RUNTIME_ENV[WMBUSMETERS_HOST_DIR]}/mqtt_subscribe.sh" \
+        "WMBusmeters subscribe script"
     prepare_owned_dir "${RUNTIME_ENV[POSTGRESQL_HOST_DIR]}" "${POSTGRESQL_UID_GID}" "Home Assistant PostgreSQL"
     ok "Persistent directories are ready."
 }

@@ -57,6 +57,7 @@ readonly UPGRADE_LOCK_FILE="${HA_STATE_DIR}/upgrade.lock"
 
 readonly HA_CONFIG_TEMPLATE="${GIT_DIR}/configs/homeassistant/configuration.yaml"
 readonly WMBUS_PUBLISH_TEMPLATE="${GIT_DIR}/configs/wmbusmeters/publish_mqtt.sh"
+readonly WMBUS_SUBSCRIBE_TEMPLATE="${GIT_DIR}/configs/wmbusmeters/mqtt_subscribe.sh"
 
 readonly ZIGBEE_DEVICE="/dev/serial/by-id/usb-SMLIGHT_SMLIGHT_SLZB-07Mg24_0ab50f4025adef1196c58a4ba8793231-if00-port0"
 

@@ -15,9 +15,3 @@ http:
 
 recorder:
   db_url: !secret recorder_db_url
-
-mqtt:
-  broker: mosquitto
-  port: 1883
-  username: !secret mqtt_user
-  password: !secret mqtt_password

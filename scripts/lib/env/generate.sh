@@ -10,7 +10,7 @@ env_generate_secret() {
 
 env_generate_secret_for() {
     case "$1" in
-        PG_SUPER_PASS|PG_PASS|MQTT_PASSWORD|ESPHOME_PASSWORD) env_generate_secret 36 ;;
+        PG_SUPER_PASS|PG_PASS|MQTT_PASSWORD|MQTT_HA_PASSWORD|ESPHOME_PASSWORD) env_generate_secret 36 ;;
         *) fail "No secret generator for $1." ;;
     esac
 }

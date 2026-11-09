@@ -1,8 +1,11 @@
 ###############################################################################
 #
 # Mosquitto for Home Assistant. Port 1883 is for LAN devices.
-# The entrypoint writes the password file from MQTT_PASSWORD.
-# The password is not placed on the container command line.
+# The entrypoint manages MQTT_USER and MQTT_HA_USER in the password file.
+# Passwords are not placed on the container command line.
+# The healthcheck authenticates only the Zigbee2MQTT account.
+# It uses an options file, so the password is not a client argument.
+# post-deploy.sh authenticates both accounts.
 #
 ###############################################################################
 
@@ -19,6 +22,8 @@ services:
       TZ: ${TZ}
       MQTT_USER: ${MQTT_USER}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_HA_USER: ${MQTT_HA_USER}
+      MQTT_HA_PASSWORD: ${MQTT_HA_PASSWORD}
     entrypoint:
       - /bin/sh
       - /usr/local/bin/ha-entrypoint.sh
@@ -28,13 +33,14 @@ services:
     volumes:
       - ../configs/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ../configs/mosquitto/entrypoint.sh:/usr/local/bin/ha-entrypoint.sh:ro
+      - ../configs/mosquitto/healthcheck.sh:/usr/local/bin/ha-mosquitto-healthcheck.sh:ro
       - ${DATA_DIR}/mosquitto/data:/mosquitto/data
       - ${DATA_DIR}/mosquitto/log:/mosquitto/log
       - ${DATA_DIR}/mosquitto/auth:/mosquitto/config/auth
     healthcheck:
       test:
-        - CMD-SHELL
-        - mosquitto_pub -h 127.0.0.1 -u "$$MQTT_USER" -P "$$MQTT_PASSWORD" -t ha/health -m up
+        - CMD
+        - /usr/local/bin/ha-mosquitto-healthcheck.sh
       interval: 30s
       timeout: 10s
       retries: 5

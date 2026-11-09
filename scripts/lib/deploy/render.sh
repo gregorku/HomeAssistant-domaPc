@@ -38,15 +38,17 @@ deploy_render_secrets() {
     if [[ -f "${dest}" ]]; then
         while IFS= read -r line || [[ -n "${line}" ]]; do
             case "${line}" in
-                recorder_db_url:*|mqtt_user:*|mqtt_password:*) continue ;;
+                recorder_db_url:*|mqtt_user:*|mqtt_password:*|mqtt_ha_user:*|mqtt_ha_password:*) continue ;;
             esac
             printf '%s\n' "${line}" >> "${tmp}"
         done < "${dest}"
     fi
     {
         printf 'recorder_db_url: %s\n' "$(yaml_double "${url}")"
-        printf 'mqtt_user: %s\n' "$(yaml_double "${RUNTIME_ENV[MQTT_USER]}")"
-        printf 'mqtt_password: %s\n' "$(yaml_double "${RUNTIME_ENV[MQTT_PASSWORD]}")"
+        # Home Assistant 2026.11 reads the broker from the UI integration.
+        # These keys only hold the account for that manual step.
+        printf 'mqtt_ha_user: %s\n' "$(yaml_double "${RUNTIME_ENV[MQTT_HA_USER]}")"
+        printf 'mqtt_ha_password: %s\n' "$(yaml_double "${RUNTIME_ENV[MQTT_HA_PASSWORD]}")"
     } >> "${tmp}"
     if [[ -f "${dest}" ]] && cmp -s "${tmp}" "${dest}"; then
         rm -f "${tmp}"

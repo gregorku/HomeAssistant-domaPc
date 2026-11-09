@@ -76,6 +76,7 @@ mkdir -p "${stage}/mosquitto/repo-config"
 cp -a "${GIT_DIR}/configs/mosquitto/mosquitto.conf" "${stage}/mosquitto/repo-config/mosquitto.conf"
 cp -a "${GIT_DIR}/configs/mosquitto/entrypoint.sh" "${stage}/mosquitto/repo-config/entrypoint.sh"
 cp -a "${GIT_DIR}/configs/wmbusmeters/publish_mqtt.sh" "${stage}/wmbusmeters/publish_mqtt.sh.from-repo"
+cp -a "${GIT_DIR}/configs/wmbusmeters/mqtt_subscribe.sh" "${stage}/wmbusmeters/mqtt_subscribe.sh.from-repo"
 
 backup_write_manifest "${stage}" "${stamp}" "${RUNTIME_ENV[POSTGRES_IMAGE]}" "${RUNTIME_ENV[HA_TAG]}"
 backup_pack "${stage}" "${archive}"

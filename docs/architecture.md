@@ -34,6 +34,8 @@ Prometheus zůstává na portu `8445`. Jeho router se nemění. Nový Authentik 
 | `ha-mosquitto` | 1883 na kontejneru | žádný, jen LAN |
 | `ha-wmbusmeters` | žádný | čte MQTT v `ha-internal` |
 
+Mosquitto má dva účty. `Zigbee2mqtt_domaPc` používá Zigbee2MQTT a WMBusmeters. `homeassistant` je vyhrazený integraci MQTT v Home Assistantu. Jejich hesla se spravují odděleně. Broker se v Home Assistantu 2026.11.0 ukládá v UI, ne v `configuration.yaml`.
+
 ESPHome má `network_mode: host`, takže `6052` poslouchá přímo na `br0` kontejneru. Samostatné mapování portu nepotřebuje.
 
 Entrypoint `:8445` zůstává Prometheu. Zigbee2MQTT má na VPS entrypoint `zigbee2mqtt-domapc` na portu `:8455`. ESPHome má entrypoint `esphome-domapc` na portu `:8456`. Oba už jsou ve statickém `traefik.yml` Infrastructure-netcup. Návrh je znovu nepřidává.

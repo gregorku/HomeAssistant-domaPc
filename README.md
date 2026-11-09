@@ -35,6 +35,19 @@ Skripty se spouštějí jako root v kontejneru, z checkoutu repozitáře.
 | `ha-esphome` | ESPHome dashboard, čtyři USB porty | `6052` přes síť kontejneru |
 | `ha-wmbusmeters` | dekódování telegramů z `wmbus/lilygo/telegram` | žádný |
 
+## MQTT účty
+
+Mosquitto má dva účty z runtime `.env`. `update-env.sh` hesla vygeneruje jen tehdy, když v `.env` ještě nejsou. Další běh je nemění.
+
+| Účet | Uživatel | Heslo | Kdo se jím přihlašuje |
+| --- | --- | --- | --- |
+| Zigbee2MQTT | `MQTT_USER` (`Zigbee2mqtt_domaPc`) | `MQTT_PASSWORD` | Zigbee2MQTT a stávající WMBusmeters |
+| Home Assistant | `MQTT_HA_USER` (`homeassistant`) | `MQTT_HA_PASSWORD` | jen Home Assistant |
+
+Změna jednoho hesla v `.env` a následný `deploy.sh` přepíše v souboru `passwd` jen tento účet. Druhé heslo i případné další MQTT účty zůstanou. Hesla se do logu nezapisují.
+
+Home Assistant 2026.11.0 broker v YAML nekonfiguruje. Účet v Mosquittu vznikne automaticky. Integraci MQTT je potřeba uložit v UI: Nastavení → Zařízení a služby → Přidat integraci → MQTT, broker `mosquitto`, port `1883`. Uživatel a heslo jsou `MQTT_HA_USER` a `MQTT_HA_PASSWORD`. Stejné hodnoty jsou v `secrets.yaml` jako `mqtt_ha_user` a `mqtt_ha_password`. Samy o sobě integraci nepřihlásí.
+
 Home Assistant jde na port 443 entrypointu `websecure` a má vlastní přihlášení, bez Authentik ForwardAuth. Zigbee2MQTT je na portu VPS `8455` a ESPHome na `8456`. Obě chrání stávající Authentik-netcup přes Authentik ForwardAuth, Embedded Outpost, `ip-whitelist` a bezpečnostní middleware. Nový Authentik se nezakládá a Authentik-netcup se nemění. Prometheus zůstává na `8445`. Návrh je v [docs/infrastructure-netcup.diff](docs/infrastructure-netcup.diff) a do Infrastructure-netcup se nezapisuje.
 
 Další popis je v [docs/architecture.md](docs/architecture.md), provoz v [docs/operations.md](docs/operations.md), zálohy v [docs/backup-restore.md](docs/backup-restore.md) a ověření v [docs/checks.md](docs/checks.md).

@@ -13,16 +13,80 @@ post_deploy_check_database() {
     ok "PostgreSQL accepts the application role."
 }
 
+post_deploy_mqtt_login() {
+    local user="$1" password="$2" label="$3"
+    # The password is stdin of docker exec. The shell does not export it.
+    # mosquitto_pub reads it from a mode 0600 options file, not from argv.
+    docker exec -i \
+        -e MQTT_USER="${user}" \
+        "${MOSQUITTO_CONTAINER}" \
+        sh -c 'set -eu
+umask 077
+IFS= read -r MQTT_PASSWORD || exit 1
+options=$(mktemp)
+cleanup() {
+    rm -f "$options"
+}
+trap cleanup EXIT
+trap '"'"'exit 129'"'"' HUP
+trap '"'"'exit 130'"'"' INT
+trap '"'"'exit 143'"'"' TERM
+chmod 600 "$options"
+{
+    printf "%s\n" "-h 127.0.0.1"
+    printf "%s\n" "-p 1883"
+    printf "%s\n" "-u ${MQTT_USER}"
+    printf "%s\n" "-P ${MQTT_PASSWORD}"
+    printf "%s\n" "-t ha/health"
+    printf "%s\n" "-m up"
+} > "$options"
+mosquitto_pub -o "$options"' \
+        <<< "${password}" \
+        >/dev/null \
+        || fail "${label} MQTT login failed."
+}
+
+post_deploy_mqtt_account_present() {
+    local user="$1" label="$2"
+    docker exec \
+        -e MQTT_USER="${user}" \
+        "${MOSQUITTO_CONTAINER}" \
+        sh -c 'grep -q "^${MQTT_USER}:" /mosquitto/config/auth/passwd' \
+        >/dev/null \
+        || fail "${label} is missing from the Mosquitto password file."
+}
+
+post_deploy_check_ha_mqtt_secrets() {
+    local secrets="${RUNTIME_ENV[HA_CONFIG_HOST_DIR]}/secrets.yaml"
+    local secrets_body line user_line pass_line found_user=0 found_pass=0
+    [[ -f "${secrets}" ]] || fail "Home Assistant secrets.yaml is missing."
+    [[ "$(stat -c '%a' "${secrets}")" == 600 ]] || fail "Home Assistant secrets.yaml is not mode 600."
+    user_line="mqtt_ha_user: $(yaml_double "${RUNTIME_ENV[MQTT_HA_USER]}")"
+    pass_line="mqtt_ha_password: $(yaml_double "${RUNTIME_ENV[MQTT_HA_PASSWORD]}")"
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        [[ "${line}" == "${user_line}" ]] && found_user=1
+        [[ "${line}" == "${pass_line}" ]] && found_pass=1
+    done < "${secrets}"
+    [[ "${found_user}" == 1 ]] || fail "Home Assistant secrets do not contain the Home Assistant MQTT user."
+    [[ "${found_pass}" == 1 ]] || fail "Home Assistant secrets do not contain the Home Assistant MQTT password."
+    secrets_body="$(<"${secrets}")"
+    [[ "${secrets_body}" != *"${RUNTIME_ENV[MQTT_PASSWORD]}"* ]] || fail "Home Assistant secrets contain the Zigbee2MQTT password."
+}
+
 post_deploy_check_mqtt() {
     print_section "MQTT"
-    docker exec \
-        -e MQTT_USER="${RUNTIME_ENV[MQTT_USER]}" \
-        -e MQTT_PASSWORD="${RUNTIME_ENV[MQTT_PASSWORD]}" \
-        "${MOSQUITTO_CONTAINER}" \
-        sh -c 'exec mosquitto_pub -h 127.0.0.1 -u "$MQTT_USER" -P "$MQTT_PASSWORD" -t ha/health -m up' \
-        >/dev/null \
-        || fail "MQTT login failed."
-    ok "MQTT accepts the application user."
+    local running
+    running="$(docker inspect -f '{{.State.Running}}' "${MOSQUITTO_CONTAINER}" 2>/dev/null || true)"
+    [[ "${running}" == true ]] || fail "Mosquitto is not running."
+    ok "Mosquitto is running."
+    post_deploy_mqtt_account_present "${RUNTIME_ENV[MQTT_USER]}" "Zigbee2MQTT account"
+    post_deploy_mqtt_account_present "${RUNTIME_ENV[MQTT_HA_USER]}" "Home Assistant account"
+    post_deploy_mqtt_login "${RUNTIME_ENV[MQTT_USER]}" "${RUNTIME_ENV[MQTT_PASSWORD]}" "Zigbee2MQTT"
+    post_deploy_mqtt_login "${RUNTIME_ENV[MQTT_HA_USER]}" "${RUNTIME_ENV[MQTT_HA_PASSWORD]}" "Home Assistant"
+    ok "MQTT accepts the Zigbee2MQTT account."
+    ok "MQTT accepts the Home Assistant account."
+    post_deploy_check_ha_mqtt_secrets
+    ok "Home Assistant MQTT credentials are available for the UI integration."
 }
 
 post_deploy_check_homeassistant() {
@@ -44,6 +108,15 @@ post_deploy_check_homeassistant() {
 
 post_deploy_check_zigbee2mqtt() {
     print_section "Zigbee2MQTT"
+    docker exec -i \
+        -e EXPECTED_USER="${RUNTIME_ENV[MQTT_USER]}" \
+        -e OTHER_USER="${RUNTIME_ENV[MQTT_HA_USER]}" \
+        "${ZIGBEE2MQTT_CONTAINER}" \
+        sh -c 'IFS= read -r EXPECTED_PASSWORD; [ "$ZIGBEE2MQTT_CONFIG_MQTT_USER" = "$EXPECTED_USER" ] && [ "$ZIGBEE2MQTT_CONFIG_MQTT_USER" != "$OTHER_USER" ] && [ "$ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD" = "$EXPECTED_PASSWORD" ]' \
+        <<< "${RUNTIME_ENV[MQTT_PASSWORD]}" \
+        >/dev/null \
+        || fail "Zigbee2MQTT is not using its own MQTT account."
+    ok "Zigbee2MQTT is using its own MQTT account."
     local i
     for ((i = 1; i <= 12; i++)); do
         if docker exec "${ZIGBEE2MQTT_CONTAINER}" \

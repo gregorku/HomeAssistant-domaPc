@@ -9,7 +9,7 @@ Archiv je nešifrovaný tar. Age se nepoužívá. `RESTIC_REPOSITORY` a `BACKUP_
 - `postgresql/homeassistant.dump`, logický dump `pg_dump -Fc`
 - celý adresář Home Assistantu, včetně `.storage`, automatizací a secrets
 - Mosquitto data, log, hesla a kopie konfiguračních souborů z repozitáře
-- Zigbee2MQTT, ESPHome a WMBusmeters včetně `publish_mqtt.sh`
+- Zigbee2MQTT, ESPHome a WMBusmeters včetně `publish_mqtt.sh` a `mqtt_subscribe.sh`
 
 Před dumpeem se zastaví Home Assistant, Zigbee2MQTT, ESPHome, WMBusmeters a Mosquitto. PostgreSQL zůstane běžet a dump se udělá rolí `ha_bootstrap`. Po úspěchu i po chybě se zastavené služby znovu spustí.
 
