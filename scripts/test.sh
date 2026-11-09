@@ -94,8 +94,18 @@ static_checks() {
         && fail_static "ESPHome is still privileged"
     grep -q 'internal_url:' "${REPO_ROOT}/configs/homeassistant/configuration.yaml" \
         && fail_static "internal_url is set without a verified LAN address"
-    grep -q 'mosquitto_passwd -b' "${REPO_ROOT}/configs/mosquitto/entrypoint.sh" \
+    local mqtt_entrypoint="${REPO_ROOT}/configs/mosquitto/entrypoint.sh"
+    grep -q 'mosquitto_passwd -b' "${mqtt_entrypoint}" \
         && fail_static "Mosquitto still receives the password as a process argument"
+    grep -q 'mosquitto_passwd -U "${plain}"' "${mqtt_entrypoint}" \
+        || fail_static "Mosquitto password is not hashed from a protected temporary file"
+    grep -q 'awk -F: -v user="${MQTT_USER}"' "${mqtt_entrypoint}" \
+        || fail_static "Mosquitto entrypoint does not preserve other password-file users"
+    grep -q 'managed_user_present' "${mqtt_entrypoint}" \
+        || fail_static "Mosquitto entrypoint does not check the managed account"
+    if grep -Fq ' > "${passwd_file}"' "${mqtt_entrypoint}"; then
+        fail_static "Mosquitto entrypoint overwrites the complete password file"
+    fi
     grep -q 'PG_SUPER_PASS' "${REPO_ROOT}/compose/40-postgresql.yml" \
         || fail_static "PostgreSQL superuser password is not separate"
     grep -q '^\.env$' "${REPO_ROOT}/.gitignore" || fail_static ".env is not ignored"
