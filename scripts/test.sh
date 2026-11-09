@@ -1147,6 +1147,9 @@ listener 1883 127.0.0.1
 allow_anonymous false
 password_file /auth/passwd
 EOF
+chown mosquitto:mosquitto /auth
+chown mosquitto:mosquitto /auth/passwd
+chown mosquitto:mosquitto /auth/mosquitto.conf
 version="$(mosquitto -h 2>&1 | head -n 1 || true)"
 case "${version}" in
     *2.1.2*) ;;
